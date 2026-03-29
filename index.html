@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>今天吃什么</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f5f5f5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+      color: white;
+      padding: 16px 20px;
+      text-align: center;
+      font-size: 20px;
+      font-weight: 600;
+      box-shadow: 0 2px 8px rgba(238, 90, 36, 0.3);
+    }
+
+    #map {
+      flex: 1;
+      min-height: 300px;
+    }
+
+    .result-card {
+      background: white;
+      border-radius: 16px 16px 0 0;
+      padding: 20px;
+      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.1);
+      transform: translateY(0);
+      transition: transform 0.3s ease;
+    }
+
+    .result-card.hidden {
+      transform: translateY(100%);
+    }
+
+    .restaurant-name {
+      font-size: 22px;
+      font-weight: 700;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .restaurant-info {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 8px;
+      color: #666;
+      font-size: 15px;
+    }
+
+    .rating {
+      color: #ff9800;
+    }
+
+    .rating .no-rating {
+      color: #999;
+    }
+
+    .address {
+      color: #888;
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    .distance {
+      color: #4caf50;
+      font-weight: 500;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 12px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-secondary {
+      background: #f0f0f0;
+      color: #666;
+    }
+
+    .btn-secondary:hover {
+      background: #e0e0e0;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: scale(1.02);
+      box-shadow: 0 4px 12px rgba(238, 90, 36, 0.4);
+    }
+
+    .status-bar {
+      background: #fff3e0;
+      color: #e65100;
+      padding: 10px 20px;
+      text-align: center;
+      font-size: 14px;
+    }
+
+    .status-bar.error {
+      background: #ffebee;
+      color: #c62828;
+    }
+
+    .status-bar.success {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .loading {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #e65100;
+      border-radius: 50%;
+      border-top-color: transparent;
+      animation: spin 1s linear infinite;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <header>今天吃什么 🍜</header>
+
+  <div id="map"></div>
+
+  <div id="status" class="status-bar">
+    <span class="loading"></span>正在获取定位...
+  </div>
+
+  <div class="result-card hidden" id="resultCard">
+    <div class="restaurant-name" id="restaurantName">餐厅名称</div>
+    <div class="restaurant-info">
+      <span class="rating" id="rating">⭐ <span class="no-rating">暂无评分</span></span>
+      <span class="distance" id="distance">距你 0m</span>
+    </div>
+    <div class="address" id="address">地址</div>
+    <div class="buttons">
+      <button class="btn btn-secondary" id="retryBtn">再选一次</button>
+      <button class="btn btn-primary" id="navBtn">导航去这里</button>
+    </div>
+  </div>
+
+  <script>
+    window._AMapSecurityConfig = {
+      securityJsCode: '1938f5644e62c2adc379a92c00e492ce',
+    };
+
+    function loadScript() {
+      var script = document.createElement('script');
+      script.src = 'https://webapi.amap.com/maps?v=2.0&key=c6addf2b44649aa393056b0db22e59a9&plugin=AMap.PlaceSearch,AMap.Geolocation,AMap.ToolBar';
+      script.onload = function() {
+        initMap();
+      };
+      document.head.appendChild(script);
+    }
+
+    let map;
+    let markers = [];
+    let userMarker;
+    let pois = [];
+    let currentRestaurant = null;
+
+    function initMap() {
+      map = new AMap.Map('map', {
+        zoom: 15,
+        center: [116.397428, 39.90923],
+        viewMode: '2D'
+      });
+
+      map.plugin('AMap.ToolBar', function() {
+        var toolbar = new AMap.ToolBar();
+        map.addControl(toolbar);
+      });
+
+      getLocation();
+    }
+
+    function getLocation() {
+      updateStatus('正在获取定位...', '');
+
+      AMap.plugin('AMap.Geolocation', function() {
+        var geolocation = new AMap.Geolocation({
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        });
+
+        geolocation.getCurrentPosition(function(status, result) {
+          if (status === 'complete') {
+            var pos = result.position;
+            map.setCenter(pos);
+            addUserMarker(pos);
+            searchNearby(pos);
+          } else {
+            updateStatus('定位失败: ' + result.message, 'error');
+            // 使用IP定位作为后备
+            useIpLocation();
+          }
+        });
+      });
+    }
+
+    function useIpLocation() {
+      AMap.plugin('AMap.CitySearch', function() {
+        var citySearch = new AMap.CitySearch();
+        citySearch.getCityByIp(function(status, result) {
+          if (status === 'complete' && result.center) {
+            var center = result.center;
+            map.setCenter(center);
+            map.setZoom(14);
+            updateStatus('使用IP定位：' + result.city, 'success');
+            searchNearby(center);
+          } else {
+            updateStatus('无法获取位置，请刷新页面重试', 'error');
+          }
+        });
+      });
+    }
+
+    function addUserMarker(position) {
+      userMarker = new AMap.Marker({
+        position: position,
+        content: '<div style="background:#4caf50;color:white;width:32px;height:32px;border-radius:50%;text-align:center;line-height:32px;font-size:14px;font-weight:bold;box-shadow:0 2px 8px rgba(0,0,0,0.4);border:3px solid white;">📍</div>',
+        title: '我的位置'
+      });
+      map.add(userMarker);
+    }
+
+    function clearMarkers() {
+      markers.forEach(function(m) {
+        map.remove(m);
+      });
+      markers = [];
+    }
+
+    function searchNearby(center) {
+      updateStatus('正在搜索周边餐厅...', '');
+
+      AMap.plugin('AMap.PlaceSearch', function() {
+        var placeSearch = new AMap.PlaceSearch({
+          pageSize: 50,
+          pageIndex: 1,
+          city: '全国',
+          extensions: 'all',
+          type: '050000'
+        });
+
+        placeSearch.searchNearBy('餐饮', center, 2000, function(status, result) {
+          console.log('搜索状态:', status);
+          console.log('搜索结果:', result);
+          if (status === 'complete' && result.poiList && result.poiList.pois.length > 0) {
+            pois = result.poiList.pois;
+            updateStatus('找到 ' + pois.length + ' 家餐厅', 'success');
+            addRestaurantMarkers(center);
+            showRandomRestaurant();
+          } else {
+            updateStatus('方圆2公里内没有餐厅', 'error');
+            console.log('搜索失败原因:', result);
+            document.getElementById('resultCard').classList.add('hidden');
+          }
+        });
+      });
+    }
+
+    function addRestaurantMarkers(center) {
+      clearMarkers();
+
+      pois.forEach(function(poi, index) {
+        var marker = new AMap.Marker({
+          position: poi.location,
+          content: '<div style="background:#ff6b6b;color:white;width:24px;height:24px;border-radius:50%;text-align:center;line-height:24px;font-size:12px;font-weight:bold;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid white;">' + (index + 1) + '</div>',
+          title: poi.name,
+          extData: index
+        });
+
+        marker.on('click', function() {
+          selectRestaurant(pois[this.getExtData()]);
+        });
+
+        markers.push(marker);
+        map.add(marker);
+      });
+    }
+
+    function showRandomRestaurant() {
+      if (pois.length === 0) return;
+      var randomIndex = Math.floor(Math.random() * pois.length);
+      selectRestaurant(pois[randomIndex]);
+    }
+
+    function selectRestaurant(restaurant) {
+      currentRestaurant = restaurant;
+
+      document.getElementById('restaurantName').textContent = restaurant.name;
+
+      var ratingHtml;
+      if (restaurant.rating) {
+        ratingHtml = '⭐ ' + restaurant.rating + ' 分';
+      } else {
+        ratingHtml = '⭐ <span class="no-rating">暂无评分</span>';
+      }
+      document.getElementById('rating').innerHTML = ratingHtml;
+
+      document.getElementById('distance').textContent = '距你 ' + restaurant.distance + 'm';
+      document.getElementById('address').textContent = restaurant.address || '暂无地址';
+
+      document.getElementById('resultCard').classList.remove('hidden');
+
+      map.setCenter(restaurant.location);
+    }
+
+    function updateStatus(text, type) {
+      var statusEl = document.getElementById('status');
+      statusEl.innerHTML = text;
+      statusEl.className = 'status-bar';
+      if (type) {
+        statusEl.classList.add(type);
+      }
+    }
+
+    document.getElementById('retryBtn').addEventListener('click', function() {
+      showRandomRestaurant();
+    });
+
+    document.getElementById('navBtn').addEventListener('click', function() {
+      if (!currentRestaurant) return;
+      var url = 'https://uri.amap.com/navigation?to=' +
+        currentRestaurant.location.lng + ',' + currentRestaurant.location.lat + ',' +
+        currentRestaurant.name + '&mode=car&callnative=1';
+      window.location.href = url;
+    });
+
+    window.onload = loadScript;
+  </script>
+</body>
+</html>
