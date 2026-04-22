@@ -416,20 +416,25 @@
       document.getElementById('toiletBtn').classList.toggle('active', mode === 'toilet');
       document.getElementById('footBtn').classList.toggle('active', mode === 'foot');
 
+      clearMarkers();
+
       if (mode === 'toilet') {
         if (toiletPois.length === 0) {
           searchNearbyToilet(userMarker.getPosition());
         } else {
+          addToiletMarkers(userMarker.getPosition());
           showRandomToilet();
         }
       } else if (mode === 'foot') {
         if (footPois.length === 0) {
           searchNearbyFoot(userMarker.getPosition());
         } else {
+          addFootMarkers(userMarker.getPosition());
           showRandomFoot();
         }
       } else {
         if (pois.length > 0) {
+          addRestaurantMarkers(userMarker.getPosition());
           showRandomRestaurant();
         }
       }
